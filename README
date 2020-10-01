@@ -13,6 +13,11 @@ Only bulk fluxes for the moment.
 Note there are some considerable modifications that make these files 
 incompatible with the original pyroms2roms.
 
+PLEASE USE WITH CAUTION.
+Check the outputs carefully. I have used the outputs for a 5 year 
+CROCO run with some basic performance assesments and I have not 
+detected any issues as yet.
+
 Dylan F. Bailey
 dylan.bailey@bayworldoceanarium.com
 
