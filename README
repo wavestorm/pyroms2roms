@@ -8,6 +8,8 @@ make_mercator.py
 make_era.py
 make_mercator_ini.py
 
+Only bulk fluxes for the moment.
+
 Note there are some considerable modifications that make these files 
 incompatible with the original pyroms2roms.
 
