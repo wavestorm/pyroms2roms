@@ -21,7 +21,7 @@ This file is part of py-roms2roms
 
 Version 1.0.1
 
-Copyright (c) 2014 by Evan Mason, IMEDEA
+Copyright (c) 2014-2018 by Evan Mason, IMEDEA
 Email: emason@imedea.uib-csic.es
 ===========================================================================
 
@@ -43,9 +43,11 @@ import time
 import scipy.interpolate.interpnd as interpnd
 from scipy.interpolate import RectBivariateSpline as rbs
 import collections
-from mpl_toolkits.basemap import Basemap
 from collections import OrderedDict
 from datetime import datetime
+
+from mpl_toolkits.basemap import Basemap
+import cartopy.crs as ccrs
 
 
 class vertInterp(object):
@@ -140,7 +142,7 @@ class ROMS(object):
         
         # Flag indicating ROMS, SODA, CFSR, etc.
         assert isinstance(model_type, str), 'model_type must be a string'
-        assert model_type in ('ROMS', 'CFSR', 'SODA', 'Mercator', 'Ecco'
+        assert model_type in ('ROMS', 'ERA', 'CFSR', 'SODA', 'Mercator', 'Ecco'
                               ), "model_type must be one of 'ROMS', 'CFSR', 'SODA', 'Mercator'"
         self.model_type = model_type
         # To be used for handling a grid that crosses
@@ -176,7 +178,7 @@ class ROMS(object):
           varname : variable ('temp', 'mask_rho', etc) to read
           indices : string of index ranges, eg. '[0,:,0]'
         '''
-        #print self.romsfile
+        #print(self.romsfile)
         try:
             with netcdf.Dataset(self.romsfile) as nc:
                 var = eval(''.join(("nc.variables[varname]", indices)))
@@ -281,7 +283,6 @@ class ROMS(object):
     @staticmethod
     def half_interp(h_one, h_two):
         '''
-        Speed up frequent operations of type 0.5 * (arr[:-1] + arr[1:])
         '''
         return ne.evaluate('0.5 * (h_one + h_two)')
 
@@ -309,7 +310,7 @@ class ROMS(object):
         def levloop(rho_in):
             Nlevs, Mshp, Lshp = rho_in.shape
             rho_out = np.zeros((Nlevs, Mshp, Lshp-1))
-            for k in xrange(Nlevs):
+            for k in range(Nlevs):
                  rho_out[k] = ROMS.rho2u_2d(rho_in[k])
             return rho_out
         assert rho_in.ndim == 3, 'rho_in must be 3d'
@@ -338,7 +339,7 @@ class ROMS(object):
         def levloop(rho_in):
             Nlevs, Mshp, Lshp = rho_in.shape
             rho_out = np.zeros((Nlevs, Mshp-1, Lshp))
-            for k in xrange(Nlevs):
+            for k in range(Nlevs):
                  rho_out[k] = ROMS.rho2v_2d(rho_in[k])
             return rho_out
         assert rho_in.ndim == 3, 'rho_in must be 3d'
@@ -372,7 +373,7 @@ class ROMS(object):
         def _levloop(u_in):
             Nlevs, Mshp, Lshp = u_in.shape
             u_out = np.zeros((Nlevs, Mshp, Lshp+1))
-            for Nlev in xrange(Nlevs):
+            for Nlev in range(Nlevs):
                 u_out[Nlev] = ROMS.u2rho_2d(u_in[Nlev])
             return u_out
         assert u_in.ndim == 3, 'u_in must be 3d'
@@ -405,7 +406,7 @@ class ROMS(object):
         def levloop(v_in):
             Nlevs, Mshp, Lshp = v_in.shape
             v_out = np.zeros((Nlevs, Mshp+1, Lshp))
-            for Nlev in xrange(Nlevs):
+            for Nlev in range(Nlevs):
                 v_out[Nlev] = ROMS.v2rho_2d(v_in[Nlev])
             return v_out
         assert v_in.ndim == 3, 'v_in must be 3d'
@@ -417,7 +418,7 @@ class ROMS(object):
         Rotate velocity vectors
         'angle' from gridfile
         """
-        if kwargs.has_key('ob'):
+        if 'ob' in kwargs: #kwargs.has_key('ob'):
             if kwargs['ob'] in 'east':
                 angle = self.angle()[:,-1]
             elif kwargs['ob'] in 'west':
@@ -439,9 +440,8 @@ class ROMS(object):
 
     def get_fillmask_cof(self, mask):
         '''Create (i, j) point arrays for good and bad data.
-            # Bad data are marked by the fill_value, good data elsewhere.
+        Bad data are marked by the fill_value, good data elsewhere.
         '''
-        # CHANGED Jan 14 to include *mask* argument
         igood = np.vstack(np.where(mask == 1)).T
         ibad  = np.vstack(np.where(mask == 0)).T
         tree = sp.cKDTree(igood)
@@ -545,9 +545,6 @@ class ROMS(object):
 
 
 
-
-
-
     def make_kdetree(self):
         ''' Make a parent kde tree that will enable selection
         minimum numbers of indices necessary to parent grid for
@@ -556,22 +553,25 @@ class ROMS(object):
         '''
         self.kdetree = sp.cKDTree(self.points)
         if not hasattr(sp.ckdtree.cKDTree, "query_ball_tree"):
-            print '------ cKDTree.query_ball_tree not found (update of scipy recommended)'
+            print('------ cKDTree.query_ball_tree not found (update of scipy recommended)')
             self.kdetree = sp.KDTree(self.points)
         return self
-
-
 
 
     def make_gnom_transform(self):
         '''
         Create Basemap instance for Gnomonic projection
         Return the transformation, M
-        '''
+        
+        Dylan F. Bailey: 
+        Add a tiny offset to the projection domain size to prevent
+        DivideByZero errors from Basemap ApsectRatio
+        '''        
         self.M = Basemap(projection = 'gnom',
                          lon_0=self.lon().mean(), lat_0=self.lat().mean(),
                          llcrnrlon=self.lon().min(), llcrnrlat=self.lat().min(),
-                         urcrnrlon=self.lon().max(), urcrnrlat=self.lat().max())
+                         urcrnrlon=self.lon().max()+0.000001, urcrnrlat=self.lat().max()+0.000001)
+        
         return self
 
 
@@ -582,8 +582,9 @@ class ROMS(object):
         '''
         tri = sp.Delaunay(self.points) # triangulate full parent
         tn = tri.find_simplex(child_grid.points)
-        assert not np.any(tn == -1), 'Error: detected child data points outside parent domain'
-        print '------ parent domain suitable for interpolation'
+        message = 'Error: detected child data points outside parent domain'
+        assert not np.any(tn == -1), message
+        print('------ parent domain suitable for interpolation')
         return self
 
 
@@ -684,17 +685,16 @@ class RomsGrid (ROMS):
 
         '''
         super(RomsGrid, self).__init__(filename, model_type)
-        #self.indices = '[self.j0:self.j1, self.i0:self.i1]'
         self.grid_file = filename
-        self._lon = self.read_nc('lon_rho')#, indices=self.indices)
-        self._lat =  self.read_nc('lat_rho')#, indices=self.indices)
-        self._pm = self.read_nc('pm')#, indices=self.indices)
-        self._pn = self.read_nc('pn')#, indices=self.indices)
-        self._maskr = self.read_nc('mask_rho')#, indices=self.indices)
-        self._angle = self.read_nc('angle')#, indices=self.indices)
-        self._h = self.read_nc('h')#, indices=self.indices)
-        self._hraw = self.read_nc('hraw')#, indices=self.indices)
-        self._f = self.read_nc('f')#, indices=self.indices)
+        self._lon = self.read_nc('lon_rho')
+        self._lat =  self.read_nc('lat_rho')
+        self._pm = self.read_nc('pm')
+        self._pn = self.read_nc('pn')
+        self._maskr = self.read_nc('mask_rho')
+        self._angle = self.read_nc('angle')
+        self._h = self.read_nc('h')
+        self._hraw = self.read_nc('hraw')
+        self._f = self.read_nc('f')
         self._uvpmask()
         self.theta_s = np.double(sigma_params['theta_s'])
         self.theta_b = np.double(sigma_params['theta_b'])
@@ -703,15 +703,32 @@ class RomsGrid (ROMS):
         self.sc_r = None
 
 
-    def lon(self):   return self._lon[self.j0:self.j1, self.i0:self.i1]
-    def lat(self):   return self._lat[self.j0:self.j1, self.i0:self.i1]
-    def pm(self):    return self._pm[self.j0:self.j1, self.i0:self.i1]
-    def pn(self):    return self._pn[self.j0:self.j1, self.i0:self.i1]
-    def maskr(self): return self._maskr[self.j0:self.j1, self.i0:self.i1]
-    def angle(self): return self._angle[self.j0:self.j1, self.i0:self.i1]
-    def h(self):     return self._h[self.j0:self.j1, self.i0:self.i1]
-    def hraw(self):  return self._hraw[self.j0:self.j1, self.i0:self.i1]
-    def f(self):     return self._f[self.j0:self.j1, self.i0:self.i1]
+    def lon(self):
+        return self._lon[self.j0:self.j1, self.i0:self.i1]
+    
+    def lat(self):
+        return self._lat[self.j0:self.j1, self.i0:self.i1]
+    
+    def pm(self):
+        return self._pm[self.j0:self.j1, self.i0:self.i1]
+    
+    def pn(self):
+        return self._pn[self.j0:self.j1, self.i0:self.i1]
+    
+    def maskr(self):
+        return self._maskr[self.j0:self.j1, self.i0:self.i1]
+    
+    def angle(self):
+        return self._angle[self.j0:self.j1, self.i0:self.i1]
+    
+    def h(self):
+        return self._h[self.j0:self.j1, self.i0:self.i1]
+    
+    def hraw(self):
+        return self._hraw[self.j0:self.j1, self.i0:self.i1]
+    
+    def f(self):
+        return self._f[self.j0:self.j1, self.i0:self.i1]
 
     def idata(self):
         return np.nonzero(self.maskr().ravel() == 1.)[0]
@@ -727,12 +744,6 @@ class RomsGrid (ROMS):
         try:
             self._umask = self.read_nc('mask_u')
         except:
-            #Mp, Lp = self.maskr().shape
-            #print 'Mp',Mp,'  Lp',Lp
-            #Mp -= 1
-            #Lp -= 1
-            #M = Mp - 1
-            #L = Lp - 1
             self._umask = self.maskr()[:, :-1] * self.maskr()[:, 1:]
             self._vmask = self.maskr()[:-1]   * self.maskr()[1:]
             self._pmask = self._umask[:-1] * self._umask[1:]
@@ -744,27 +755,12 @@ class RomsGrid (ROMS):
 
     def umask(self):
         return self._umask
-        # Not sure about all below (29/12/2017) BUT indices needed
-        # for tiled grids...
-        # added '-1' 1/9/2016 cos problem in py_mercator_ini line ~385
-        '''try:
-            return self._umask[self.j0:self.j1, self.i0:self.i1-1]
-        except:
-            return self._umask[self.j0:self.j1, self.i0:-2]'''
-
 
     def vmask(self):
         return self._vmask
-        # Not sure about all below (29/12/2017)
-        # added '-1' 1/9/2016 cos problem in py_mercator_ini line ~385
-        '''try:
-            return self._vmask[self.j0:self.j1-1, self.i0:self.i1]
-        except:
-            return self._vmask[self.j0:-2, self.i0:self.i1]'''
-
 
     def pmask(self):
-        print 'fix me'
+        print('fix me')
         return self._pmask
 
 
@@ -851,27 +847,24 @@ class RomsGrid (ROMS):
             else:
                 Cs = csrf
             return Cs
-        #
+        
         try:
             self.scoord
         except:
             self.scoord = 'new2008'
+        
         N = np.float64(self.N.copy())
         cff1 = 1. / np.sinh(self.theta_s)
         cff2 = 0.5 / np.tanh(0.5 * self.theta_s)
         sc_w = (np.arange(N + 1, dtype=np.float64) - N) / N
         sc_r = ((np.arange(1, N + 1, dtype=np.float64)) - N - 0.5) / N
         
-        #sc_w = np.arange(-1., 1. / N, 1. / N, dtype=np.float64)
-        #sc_r = 0.5 * (sc_w[1:] + sc_w[:-1])
-        
         if 'w' in point_type:
             sc = sc_w
             N += 1. # add a level
         else:
             sc = sc_r
-        #Cs = (1. - self.theta_b) * cff1 * np.sinh(self.theta_s * sc)  \
-                 #+ self.theta_b * (cff2 * np.tanh(self.theta_s * (sc + 0.5)) - 0.5)
+
         z  = np.empty((int(N),) + self.h().shape, dtype=np.float64)
         if self.scoord in 'new2008':
             Cs = CSF(self, sc)
@@ -1085,7 +1078,6 @@ class RomsGrid (ROMS):
 
     def limits(self):
         '''
-
         '''
         return np.array([np.array([self.lon().min(), self.lon().max(),
                                    self.lon().max(), self.lon().min()]),
@@ -1107,7 +1099,7 @@ class RomsGrid (ROMS):
 
         # Interpolate parent vertical indices at parent depths
         # to child depths
-        for i in xrange(pzr_bry.shape[1]):
+        for i in range(pzr_bry.shape[1]):
 
             akima = si.Akima1DInterpolator(pzr_bry[:, i], np.arange(pzr_bry.shape[0]))
             akima.extrapolate = True
@@ -1115,72 +1107,6 @@ class RomsGrid (ROMS):
             weights[:, i] = akima(czr_bry[:, i])
 
         return weights
-
-
-    #def get_map_coordinate_weightsXXXXXXXX(self, czr_bry, pzr_bry):
-        #'''
-        #Calculate the weights required for the vertical interpolation
-        #with vertInterp (map_coordinates)
-        #'''
-        #assert pzr_bry.shape[1] == czr_bry.shape[1], \
-            #'pzr_bry and czr_bry must have the same lengths'
-
-        ## For the present purposes, we are assuming that parent-child topo matching
-        ## has been applied along the open boundaries
-        ## THIS IS WRONG
-        #'''assert np.abs((czr_bry[-1][0]-pzw_bry[-1][0])).max() <= 10., \
-            #'max. depth difference between parent and child exceeds 10 m;\n \
-             #has the child topo been matched?'''
-
-        #czr_bry = np.float128(czr_bry)
-        #pzr_bry = np.float128(pzr_bry)
-
-        #weights = np.full_like(czr_bry, self.N-1, dtype=np.float64)
-
-        ## Loop along the boundary
-        #for i in np.arange(pzr_bry.shape[1]):
-            #weight_tmp = np.array([], dtype=np.float64)
-            #dzp = np.diff(pzr_bry[:,i])
-
-            ## Loop from bottom to surface of parent
-            ##for k, dz in enumerate(dzp):
-            #for k in np.arange(pzr_bry.shape[0]):
-
-                ##dz =
-
-                ## If the child has deeper bottom layer than the parent
-                #if k == 0 and np.any(pzr_bry[k,i] > czr_bry[:,i]): # bottom layer
-
-                    #choices = np.nonzero(czr_bry[:,i] < pzr_bry[k,i])[0]
-                    #print 'deeper child bottom depth: chd %s, par %s' %(czr_bry[k,i], pzr_bry[k,i])
-                    #print 'choices bottom', k, choices, choices.shape
-
-                ## If the child has shallower top layer than the parent
-                #elif k == pzr_bry.shape[0] - 1 and np.any(pzr_bry[k,i] < czr_bry[:,i]): # top layer
-
-                    #choices = np.nonzero(czr_bry[:,i] > pzr_bry[k,i])[0]
-                    #print 'choices top', k, choices, choices.shape
-
-                ## Everything in between
-                #else:
-
-                    #choices = np.nonzero(np.logical_and(czr_bry[:,i] < pzr_bry[k,i],
-                                                        #czr_bry[:,i] >= pzr_bry[k-1,i]))[0]
-                    #print 'choices', k, choices, choices.shape
-
-                #for choice in choices:
-                    ##weight     = k + np.abs(np.diff((pzr_bry[k, i], czr_bry[choice, i]))) / dz
-                    #weight = k + ((pzr_bry[k,i] - czr_bry[choice,i]) / dz)
-                    #if k==0:print 'kkk===0000 weight',weight
-                    #weight_tmp = np.append(weight_tmp, weight)
-
-            #print 'weight_tmp', weight_tmp
-            #print 'weight_tmp.shape', weight_tmp.shape, i
-            #try: weights[:-1,i] = weight_tmp
-            #except: weights[:,i] = weight_tmp
-            #print 'weights ---------', weights[:,i]
-            #print '--------'
-        #return weights
 
 
 
@@ -1217,15 +1143,6 @@ class WestGrid(RomsGrid):
     def h(self):
         return self.read_nc('h',  indices='[:,0]')
 
-    #def dz_rho_points(self):
-        #"""
-        #Sigma layer depths (dz) at `rho` points, 3d matrix
-        #"""
-        #try: return self._dz_rho_points
-        #except Exception:
-            #self._set_dz_rho_points()
-            #return self._dz_rho_points
-
     def umask(self):
         return self.maskr().squeeze()
 
@@ -1244,8 +1161,6 @@ class WestGrid(RomsGrid):
             self._dz_v *= 0.5
             return self._dz_v
 
-    #def scoord2z_r(self, zeta=0., alpha=0., beta=1.):
-        #return self._scoord2z('r', zeta=zeta, alpha=alpha, beta=beta)[0]
 
 
 class EastGrid(RomsGrid):
@@ -1306,9 +1221,6 @@ class EastGrid(RomsGrid):
             self._dz_v *= 0.5
             return self._dz_v
 
-    #def scoord2z_r(self, zeta=0., alpha=0., beta=1.):
-        #return self._scoord2z('r', zeta=zeta, alpha=alpha, beta=beta)[0]
-
 
 
 class NorthGrid(RomsGrid):
@@ -1348,15 +1260,6 @@ class NorthGrid(RomsGrid):
     def vmask(self):
         return self.maskr().squeeze()
 
-    #def dz_rho_points(self):
-        #"""
-        #Sigma layer depths (dz) at `rho` points, 3d matrix
-        #"""
-        #try: return self._dz_rho_points
-        #except Exception:
-            #self._set_dz_rho_points()
-            #return self._dz_rho_points
-
     def dz_u(self):
         """
         Sigma layer depths (dz) at `u` points, 2d matrix
@@ -1369,8 +1272,7 @@ class NorthGrid(RomsGrid):
             return self._dz_u
 
 
-    #def scoord2z_r(self, zeta=0., alpha=0., beta=1.):
-        #return self._scoord2z('r', zeta=zeta, alpha=alpha, beta=beta)[0]
+
 
 
 class SouthGrid(RomsGrid):
@@ -1404,14 +1306,6 @@ class SouthGrid(RomsGrid):
     def h(self):
         return self.read_nc('h',  indices='[0]')
 
-    #def dz_rho_points(self):
-        #"""
-        #Sigma layer depths (dz) at `rho` points, 3d matrix
-        #"""
-        #try: return self._dz_rho_points
-        #except Exception:
-            #self._set_dz_rho_points()
-            #return self._dz_rho_points
     def umask(self):
         return (self.maskr()[0,:-1] * self.maskr()[0,1:]).squeeze()
 
@@ -1430,15 +1324,6 @@ class SouthGrid(RomsGrid):
             self._dz_u = self.scoord2dz()[:,:-1] + self.scoord2dz()[:,1:]
             self._dz_u *= 0.5
             return self._dz_u
-
-    #def scoord2z_r(self, zeta=0., alpha=0., beta=1.):
-        #return self._scoord2z('r', zeta=zeta, alpha=alpha, beta=beta)[0]
-
-
-
-
-
-
 
 
 
@@ -1489,77 +1374,77 @@ class RomsData (ROMS):
         '''
         # Global attributes
         nc = netcdf.Dataset(self.romsfile, 'w', format='NETCDF4')
-        nc.created  = datetime.now().isoformat()
-        nc.type     = 'ROMS boundary file produced by %s.py' %madeby
+        nc.created = datetime.now().isoformat()
+        nc.type = 'ROMS boundary file produced by %s.py' %madeby
         nc.grd_file = grdobj.romsfile
-        nc.hc       = grdobj.hc
-        nc.theta_s  = grdobj.theta_s
-        nc.theta_b  = grdobj.theta_b
-        nc.Tcline   = grdobj.hc
-        nc.Cs_r     = grdobj.Cs_r()
-        nc.Cs_w     = grdobj.Cs_w()
+        nc.hc = grdobj.hc
+        nc.theta_s = grdobj.theta_s
+        nc.theta_b = grdobj.theta_b
+        nc.Tcline = grdobj.hc
+        nc.Cs_r = grdobj.Cs_r()
+        nc.Cs_w = grdobj.Cs_w()
         nc.VertCoordType = 'NEW'
-        try: # see pysoda2roms
+        try:  # see pysoda2roms
             nc.first_file = self.first_file
             nc.last_file = self.last_file
         except Exception:
             pass
 
         # Dimensions
-        nc.createDimension('xi_rho',   grdobj.lon().shape[1])
-        nc.createDimension('xi_u',     grdobj.lon().shape[1]-1)
-        nc.createDimension('eta_rho',  grdobj.lon().shape[0])
-        nc.createDimension('eta_v',    grdobj.lon().shape[0]-1)
-        nc.createDimension('s_rho',    grdobj.N)
-        nc.createDimension('s_w',      grdobj.N+1)
+        nc.createDimension('xi_rho', grdobj.lon().shape[1])
+        nc.createDimension('xi_u', grdobj.lon().shape[1]-1)
+        nc.createDimension('eta_rho', grdobj.lon().shape[0])
+        nc.createDimension('eta_v', grdobj.lon().shape[0]-1)
+        nc.createDimension('s_rho', grdobj.N)
+        nc.createDimension('s_w', grdobj.N+1)
         nc.createDimension('bry_time', None)
-        nc.createDimension('one',      1)
+        nc.createDimension('one', 1)
 
         # Create the variables and write...
         nc.createVariable('theta_s', 'f', ('one'))
         nc.variables['theta_s'].long_name = 'S-coordinate surface control parameter'
-        nc.variables['theta_s'].units     = 'nondimensional'
-        nc.variables['theta_s'][:]        = grdobj.theta_s
+        nc.variables['theta_s'].units = 'nondimensional'
+        nc.variables['theta_s'][:] = grdobj.theta_s
 
         nc.createVariable('theta_b', 'f', ('one'))
         nc.variables['theta_b'].long_name = 'S-coordinate bottom control parameter'
-        nc.variables['theta_b'].units     = 'nondimensional'
-        nc.variables['theta_b'][:]        = grdobj.theta_b
+        nc.variables['theta_b'].units = 'nondimensional'
+        nc.variables['theta_b'][:] = grdobj.theta_b
 
         nc.createVariable('Tcline', 'f', ('one'))
-        nc.variables['Tcline'].long_name  = 'S-coordinate surface/bottom layer width'
-        nc.variables['Tcline'].units      = 'meters'
-        nc.variables['Tcline'][:]         = grdobj.hc
+        nc.variables['Tcline'].long_name = 'S-coordinate surface/bottom layer width'
+        nc.variables['Tcline'].units = 'meters'
+        nc.variables['Tcline'][:] = grdobj.hc
 
         nc.createVariable('hc', 'f', ('one'))
-        nc.variables['hc'].long_name      = 'S-coordinate parameter, critical depth'
-        nc.variables['hc'].units          = 'meters'
-        nc.variables['hc'][:]             = grdobj.hc
+        nc.variables['hc'].long_name = 'S-coordinate parameter, critical depth'
+        nc.variables['hc'].units = 'meters'
+        nc.variables['hc'][:] = grdobj.hc
 
         nc.createVariable('sc_r', 'f8', ('s_rho'))
-        nc.variables['sc_r'].long_name    = 'S-coordinate at RHO-points'
-        nc.variables['sc_r'].units        = 'nondimensional'
-        nc.variables['sc_r'].valid_min    = -1.
-        nc.variables['sc_r'].valid_max    = 0.
-        nc.variables['sc_r'][:]           = grdobj.sc_r
+        nc.variables['sc_r'].long_name = 'S-coordinate at RHO-points'
+        nc.variables['sc_r'].units = 'nondimensional'
+        nc.variables['sc_r'].valid_min = -1.
+        nc.variables['sc_r'].valid_max = 0.
+        nc.variables['sc_r'][:] = grdobj.sc_r
 
         nc.createVariable('Cs_r', 'f8', ('s_rho'))
-        nc.variables['Cs_r'].long_name    = 'S-coordinate stretching curves at RHO-points'
-        nc.variables['Cs_r'].units        = 'nondimensional'
-        nc.variables['Cs_r'].valid_min    = -1.
-        nc.variables['Cs_r'].valid_max    = 0.
-        nc.variables['Cs_r'][:]           = grdobj.Cs_r()
+        nc.variables['Cs_r'].long_name = 'S-coordinate stretching curves at RHO-points'
+        nc.variables['Cs_r'].units = 'nondimensional'
+        nc.variables['Cs_r'].valid_min = -1.
+        nc.variables['Cs_r'].valid_max = 0.
+        nc.variables['Cs_r'][:] = grdobj.Cs_r()
 
         nc.createVariable('Cs_w', 'f8', ('s_w'))
-        nc.variables['Cs_w'].long_name    = 'S-coordinate stretching curves at w-points'
-        nc.variables['Cs_w'].units        = 'nondimensional'
-        nc.variables['Cs_w'].valid_min    = -1.
-        nc.variables['Cs_w'].valid_max    = 0.
-        nc.variables['Cs_w'][:]           = grdobj.Cs_w()
+        nc.variables['Cs_w'].long_name = 'S-coordinate stretching curves at w-points'
+        nc.variables['Cs_w'].units = 'nondimensional'
+        nc.variables['Cs_w'].valid_min = -1.
+        nc.variables['Cs_w'].valid_max = 0.
+        nc.variables['Cs_w'][:] = grdobj.Cs_w()
 
         nc.createVariable('bry_time', 'f8', ('bry_time'), zlib=True)
         nc.variables['bry_time'].long_name = 'time for boundary data'
-        nc.variables['bry_time'].units     = 'days'
+        nc.variables['bry_time'].units = 'days'
         '''if cycle:
             nc.variables['bry_time'].cycle_length = cycle # days'''
 
@@ -1800,122 +1685,49 @@ if __name__ == '__main__':
     '''
     pyrom2roms (Python version of roms2roms written in Matlab).
 
-    Differences from roms2roms:
-      Parent/child topo matching along the child grid boundary is automatic
-      in pyroms2roms (NOT YET IMPLEMENTED)
-
-    TO DO:
-      Using a KDE tree it should be possible to compute all open
-       boundaries together; ie treat them as a single boundary; this
-       should speed thing up significantly
-      Start work on extra_variables
-
-    Evan Mason 2012
     '''
 
 
     #_USER DEFINED VARIABLES_______________________________________
-    #par_dir     = '../'
-    #par_dir     = '/shared/emason/runs2009/na_2009_7pt5km/'
-    #par_dir     = '/marula/emason/runs2009/na_2009_7pt5km/'
-    #par_dir     = '/marula/emason/runs2009/cb_2009_3km_42/'
-    #par_dir     = '/marula/emason/runs2009/gc_2009_1km_60/'
-    #par_grd     = 'roms_grd_NA2009_7pt5km.nc'
-    #par_dir     = '/marula/emason/runs2012/na_7pt5km/'
-    #par_dir     = '/marula/emason/runs2013/na_7pt5km_intann_5day/'
-    #par_grd     = 'roms_grd_NA2009_7pt5km.nc'
-    #par_dir      = '/marula/emason/runs2012/MedSea5_intann_monthly/'
-    par_dir    = '/marula/emason/runs2016/gc_2016_800m_50/'
+    par_dir    = '/parent/dir/'
 
-    #par_grd    = 'grd_MedSea5.nc'
-    #par_grd    = 'roms_grd_NA2009_7pt5km.nc'
-    #par_grd    = 'cb_2009_3km_grd_smooth.nc'
-    #par_grd     = 'gc_2009_1km_grd_smooth.nc'
-    #par_grd    = 'grd_AlbSea_1pt5km.nc'
-    par_grd    = 'grd_gc800m_2016.nc'
+    par_grd    = 'grd_croco_parent.nc'
 
-    if 'roms_grd_NA2009_7pt5km.nc' in par_grd:
+    if 'grd_croco_parent.nc' in par_grd:
         par_sigma_params = dict(theta_s=6, theta_b=0, hc=120, N=32)
-    elif 'grd_gc800m_2016.nc' in par_grd:
-        par_sigma_params = dict(theta_s=7, theta_b=6, hc=300, N=50)
-    elif 'cb_2009_3km_grd_smooth.nc' in par_grd:
-        par_sigma_params = dict(theta_s=6, theta_b=2, hc=120, N=42)
-    elif 'gc_2009_1km_grd_smooth.nc' in par_grd:
-        par_sigma_params = dict(theta_s=6, theta_b=2, hc=120, N=60)
+    
+    elif 'grd_other_parent.nc' in par_grd:
+        par_sigma_params = dict(theta_s=7, theta_b=2, hc=300, N=50)
+    
+    else:
+        Exception
+    
+    chd_dir     = '/child/dir/'
+    
 
-    #chd_dir     = '../'
-    #chd_dir     = '/nas02/emason/runs2009/cb_2009_3km_42/'
-    #chd_dir     = '/home/emason/toto/yeray/'
-    #chd_grd     = 'cb_2009_3km_grd_smooth.nc'
-    #chd_grd     = 'grd_canbas2.5.nc'
-    #chd_dir     = '/marula/emason/runs2013/canwake4km/'
-    #chd_dir     = '/marula/emason/runs2013/cb_3km_2013_intann/'
-    #chd_grd     = 'grd_canwake4km.nc'
-    #chd_grd     = 'cb_2009_3km_grd_smooth.nc'
-    #chd_dir    = '/marula/emason/runs2013/AlbSea_1pt25/'
-    #chd_dir    = '/marula/emason/runs2013/cart500/'
-    #chd_dir    = '/marula/emason/runs2014/canbas4/'
-    #chd_dir    = '/marula/emason/runs2014/gc1km_2014/'
-    #chd_dir     = '/marula/emason/runs2015/GranCan250/'
-    #chd_dir     = '/marula/emason/runs2017/gc250/'
-    chd_dir     = '/marula/emason/runs2017/gc250m_extended/'
-    #chd_dir     = '/marula/emason/runs2016/gc_2016_1km_60_extended/'
+    chd_grd     = 'grd_croco_child.nc'
 
-    #chd_grd    = 'grd_AlbSea_1pt25.nc'
-    #chd_grd    = 'grd_cart500.nc'
-    #chd_grd    = 'grd_canbas4.nc'
-    #chd_grd    = 'grd_gc1km_2014.nc'
-    #chd_grd     = 'grd_gc250.nc'
-    chd_grd     = 'grd_gc250m_extended.nc'
-    #chd_grd     = 'grd_gc1km_2016.nc'
-    #chd_grd     = 'grd_gc800m_2016.nc'
 
-    if 'grd_gc1km_2016.nc' in chd_grd:
+    if 'grd_croco_child.nc' in chd_grd:
         chd_sigma_params = dict(theta_s=7, theta_b=2, hc=300, N=60)
-        bry_filename = 'bry_gc1km_2016.nc.FULL'
+        bry_filename = 'bry_croco_child.nc'
         obc_dict = dict(south=1, east=0, north=1, west=1) # 1=open, 0=closed
 
-    elif 'grd_gc800m_2016.nc' in chd_grd:
+    elif 'grd_other_child.nc' in chd_grd:
         chd_sigma_params = dict(theta_s=7., theta_b=6, hc=300, N=50)
-        bry_filename = 'bry_gc800m_2016.nc'
+        bry_filename = 'bry_other_child.nc'
         obc_dict = dict(south=1, east=1, north=1, west=1) # 1=open, 0=closed
 
-    elif 'grd_gc250m_extended.nc' in chd_grd:
-        chd_sigma_params = dict(theta_s=7., theta_b=6, hc=300, N=50)
-        #bry_filename = 'bry_gc250m_extended.nc'
-        bry_filename = 'bry_gc250m_extended.nc.TEST'
-        obc_dict = dict(south=1, east=1, north=1, west=1) # 1=open, 0=closed
-
-    elif 'grd_canbas4.nc' in chd_grd:
-        chd_sigma_params = dict(theta_s=6., theta_b=0, hc=120, N=32)
-        bry_filename = 'bry_canbas4.nc'
-        obc_dict = dict(south=1, east=0, north=1, west=1) # 1=open, 0=closed
-
-    elif 'grd_gc1km_2014.nc' in chd_grd:
-        chd_sigma_params = dict(theta_s=6., theta_b=2, hc=120, N=45)
-        bry_filename = 'bry_gc1km_2014.nc'
-        obc_dict = dict(south=1, east=0, north=1, west=1) # 1=open, 0=closed
-
-    elif chd_grd in ('grd_gc250_coast.nc', 'grd_gc250.nc'):
-        chd_sigma_params = dict(theta_s=6., theta_b=2, hc=120, N=60)
-        bry_filename = 'bry_gc250_coast_Y2.nc'
-        obc_dict = dict(south=1, east=1, north=1, west=1) # 1=open, 0=closed
     else:
         Exception('Unknown grid "%s"' % chd_grd)
 
     # Boundary file
     bry_cycle = 0     # number of days between records or, set to 0 for no cycle
-    #bry_filename = 'bry_canwake4km.nc' # bry filename
-    #bry_filename = 'bry_cb_3km_2013_intann.nc' # bry filename
-    #bry_filename = 'bry_AlbSea_1pt25_20030101.nc' # bry filename
-    #bry_filename = 'bry_cart500.nc' # bry filename
     bry_type     = 'roms_avg' # parent file to read data from,
                               # usually one of 'roms_avg', 'roms_his' or 'roms_rst'
     first_file   = '0000' # first/last avg/his file,
     last_file    = '1770' #   e.g., '0050' gives roms_avg.0050.nc
-    #last_file    = '1335'
     first_rec    =  1    # desired record no. from first avg/his file
-    #last_rec     =  15     # desired record no. from last avg/his file
 
     roms_vars = ['zeta', 'temp', 'salt', 'u']
 
@@ -1949,16 +1761,15 @@ if __name__ == '__main__':
     # Activate flag for zero crossing trickery
     cgrd.check_zero_crossing()
     if cgrd.zero_crossing is True:
-        print 'The ROMS domain straddles the zero-degree meridian'
+        print('The ROMS domain straddles the zero-degree meridian')
         pgrd.zero_crossing = True
 
     # Set pgrd indices (i0:i1, j0:j1) for minimal subgrid around chd
     pgrd.set_subgrid(cgrd)
     pgrd.make_gnom_transform()
-    #pgrd.proj2gnom(ignore_land_points=False)
-    #pgrd.make_kdetree()
 
-    if 0: # check the result of set_subgrid()
+
+    if 0:  # check the result of set_subgrid()
         debug0(pgrd.lon(), pgrd.lat(), pgrd.maskr(),
                cgrd.boundary()[0], cgrd.boundary()[1])
 
@@ -2023,7 +1834,7 @@ if __name__ == '__main__':
         pgrd, junk = prepare_parent_roms(pgrd, balldist)
 
         # Get parent zr (pzr_bry) at child points
-        for k in xrange(int(pgrd.N)):
+        for k in range(int(pgrd.N)):
             pzr_bry_tmp = horizInterp(pgrd.tri, pgrd.scoord2z_r()[k].flat[pgrd.ball])(cgrd_at_bry.points)
             try:
                 pzr_bry = np.vstack((pzr_bry, pzr_bry_tmp))
@@ -2038,15 +1849,10 @@ if __name__ == '__main__':
 
         if proceed:
 
-            print '\n--- processing %sern boundary' %open_boundary
+            print('\n--- processing %sern boundary' % open_boundary)
             for roms_var in roms_vars:
 
-                print '\nProcessing variable *%s*' %roms_var
-
-                #if 'u' in ecco_var:
-                    #romsbry_v = RomsData(roms_file, 'ROMS', 'v', cgrd_at_bry,
-                                     #i0=pgrd.i0, i1=pgrd.i1, j0=pgrd.j0, j1=pgrd.j1)
-                    #romsbry_v = prepare_roms(romsbry_v, balldist)
+                print('\nProcessing variable *%s*' % roms_var)
 
                 tind = 0 # index for writing records to bry file
                 active = False # flag to roms_files for loop
@@ -2059,9 +1865,6 @@ if __name__ == '__main__':
                 cubar = np.zeros_like(czeta)
                 cvbar = np.zeros_like(czeta)
 
-                #ptracer = np.zeros((pgrd.N+2, czeta.size))
-                #pu = np.zeros((pgrd.N+2, czeta.size))
-                #pv = np.zeros((pgrd.N+2, czeta.size))
                 ptracer = np.zeros((int(pgrd.N), czeta.size))
                 pu = np.zeros_like(ptracer)
                 pv = np.zeros_like(ptracer)
@@ -2073,13 +1876,13 @@ if __name__ == '__main__':
 
                     if first_file in roms_file:
                         active = True
-			dataind = first_rec - 1
-		    else:
-			dataind = 0
+                        dataind = first_rec - 1
+                    else:
+                        dataind = 0
 
                     if active:
 
-                        print 'Opening file', roms_file
+                        print('Opening file', roms_file)
                         rfile = RomsData(roms_file, 'ROMS')
 
                         with netcdf.Dataset(roms_file) as nc:
@@ -2087,55 +1890,63 @@ if __name__ == '__main__':
                             ot_loop_start = time.time()
                             for ocean_time in nc.variables['ocean_time'][dataind:]:
 
-                                #print '---processing record', dataind + 1
-
                                 if 'zeta' in roms_var:
 
-                                    romsdata[0] = nc.variables['zeta'][dataind, pgrd.j0:pgrd.j1, pgrd.i0:pgrd.i1]
+                                    romsdata[0] = nc.variables['zeta'][
+                                        dataind, pgrd.j0:pgrd.j1, pgrd.i0:pgrd.i1]
+                                    
                                     # Read in variables and fill masked areas
                                     if 'rho_weight' in locals():
-                                        romsdata[0] = rfile.fillmask(romsdata[0], pgrd.maskr(), rho_weight)
+                                        romsdata[0] = rfile.fillmask(romsdata[0],
+                                                                     pgrd.maskr(), rho_weight)
                                     else:
-                                        romsdata[0], rho_weight = rfile.fillmask(romsdata[0], pgrd.maskr())
+                                        romsdata[0], rho_weight = rfile.fillmask(romsdata[0],
+                                                                                 pgrd.maskr())
 
-                                    czeta[:] = horizInterp(pgrd.tri, romsdata[0].flat[pgrd.ball])(cgrd_at_bry.points)
+                                    czeta[:] = horizInterp(pgrd.tri, romsdata[0].flat[
+                                        pgrd.ball])(cgrd_at_bry.points)
 
 
                                 elif 'u' in roms_var:
 
-                                    romsdata[:] = pgrd.u2rho_3d(nc.variables['u'][dataind, :, pgrd.j0:pgrd.j1, pgrd.i0:pgrd.i1-1])
-                                    romsdatav[:] = pgrd.v2rho_3d(nc.variables['v'][dataind, :, pgrd.j0:pgrd.j1-1, pgrd.i0:pgrd.i1])
-                                    for k in xrange(int(pgrd.N)):
+                                    romsdata[:] = pgrd.u2rho_3d(nc.variables['u'][
+                                        dataind, :, pgrd.j0:pgrd.j1, pgrd.i0:pgrd.i1-1])
+                                    romsdatav[:] = pgrd.v2rho_3d(nc.variables['v'][
+                                        dataind, :, pgrd.j0:pgrd.j1-1, pgrd.i0:pgrd.i1])
+                                    for k in range(int(pgrd.N)):
                                         if 'u_weight' in locals():
-                                            romsdata[k] = rfile.fillmask(romsdata[k], pgrd.maskr(), u_weight)
-                                            romsdatav[k] = rfile.fillmask(romsdatav[k], pgrd.maskr(), v_weight)
+                                            romsdata[k] = rfile.fillmask(romsdata[k],
+                                                                         pgrd.maskr(), u_weight)
+                                            romsdatav[k] = rfile.fillmask(romsdatav[k],
+                                                                          pgrd.maskr(), v_weight)
                                         else:
-                                            romsdata[k], u_weight = rfile.fillmask(romsdata[k], pgrd.maskr())
-                                            romsdatav[k], v_weight = rfile.fillmask(romsdatav[k], pgrd.maskr())
-                                        romsdata[k], romsdatav[k] = pgrd.rotate(romsdata[k], romsdatav[k], sign=-1) # rotate to north
-                                        #pu[k+1] = horizInterp(pgrd.tri, romsdata[k].flat[pgrd.ball])(cgrd_at_bry.points)
-                                        #pv[k+1] = horizInterp(pgrd.tri, romsdatav[k].flat[pgrd.ball])(cgrd_at_bry.points)
-                                        pu[k] = horizInterp(pgrd.tri, romsdata[k].flat[pgrd.ball])(cgrd_at_bry.points)
-                                        pv[k] = horizInterp(pgrd.tri, romsdatav[k].flat[pgrd.ball])(cgrd_at_bry.points)
+                                            romsdata[k], u_weight = rfile.fillmask(
+                                                romsdata[k], pgrd.maskr())
+                                            romsdatav[k], v_weight = rfile.fillmask(
+                                                romsdatav[k], pgrd.maskr())
+                                        romsdata[k], romsdatav[k] = pgrd.rotate(romsdata[k],
+                                                                                romsdatav[k], sign=-1)  # rotate to north
+                                        pu[k] = horizInterp(pgrd.tri, romsdata[k].flat[
+                                            pgrd.ball])(cgrd_at_bry.points)
+                                        pv[k] = horizInterp(pgrd.tri, romsdatav[k].flat[
+                                            pgrd.ball])(cgrd_at_bry.points)
                                     # Prepare for vertical interpolations
-                                    #pu[0], pu[-1] = pu[1], pu[-2]
-                                    #pv[0], pv[-1] = pv[1], pv[-2]
                                     cu[:] = vinterp.vert_interp(pu)
                                     cv[:] = vinterp.vert_interp(pv)
-                                    for k in xrange(int(cgrd_at_bry.N)):
+                                    for k in range(int(cgrd_at_bry.N)):
                                         cu[k], cv[k] = cgrd_at_bry.rotate(cu[k], cv[k], sign=1)
 
 
 
                                 else: # tracers
 
-                                    romsdata[:] = nc.variables[roms_var][dataind, :, pgrd.j0:pgrd.j1, pgrd.i0:pgrd.i1]
-                                    for k in xrange(int(pgrd.N)):
+                                    romsdata[:] = nc.variables[roms_var][dataind,
+                                                                         :, pgrd.j0:pgrd.j1, pgrd.i0:pgrd.i1]
+                                    for k in range(int(pgrd.N)):
                                         romsdata[k] = rfile.fillmask(romsdata[k], pgrd.maskr(), rho_weight)
-                                        #ptracer[k+1] = horizInterp(pgrd.tri, romsdata[k].flat[pgrd.ball])(cgrd_at_bry.points)
-                                        ptracer[k] = horizInterp(pgrd.tri, romsdata[k].flat[pgrd.ball])(cgrd_at_bry.points)
+                                        ptracer[k] = horizInterp(pgrd.tri, romsdata[k].flat[
+                                            pgrd.ball])(cgrd_at_bry.points)
                                     # Prepare for vertical interpolations
-                                    #ptracer[0], ptracer[-1] = ptracer[1], ptracer[-2]
                                     ctracer[:] = vinterp.vert_interp(ptracer)
 
 
@@ -2153,8 +1964,10 @@ if __name__ == '__main__':
                                         # Get barotropic velocities and save
                                         if open_boundary in ('east', 'west'):
                                             cv[:,:-1] = 0.5 * (cv[:,:-1] + cv[:,1:])
-                                            cubar[:] = cgrd.get_barotropic_velocity(cu, cgrd_at_bry.scoord2dz())
-                                            cvbar[:-1] = cgrd.get_barotropic_velocity(cv[:,:-1], cgrd_at_bry.dz_v())
+                                            cubar[:] = cgrd.get_barotropic_velocity(cu,
+                                                                                    cgrd_at_bry.scoord2dz())
+                                            cvbar[:-1] = cgrd.get_barotropic_velocity(cv[:,:-1],
+                                                                                      cgrd_at_bry.dz_v())
                                             
                                             cu *= cgrd_at_bry.umask()
                                             cubar *= cgrd_at_bry.umask()
@@ -2168,8 +1981,10 @@ if __name__ == '__main__':
 
                                         elif open_boundary in ('north', 'south'):
                                             cu[:,:-1] = 0.5 * (cu[:,:-1] + cu[:,1:])
-                                            cubar[:-1] = cgrd.get_barotropic_velocity(cu[:,:-1], cgrd_at_bry.dz_u())
-                                            cvbar[:] = cgrd.get_barotropic_velocity(cv, cgrd_at_bry.scoord2dz())
+                                            cubar[:-1] = cgrd.get_barotropic_velocity(cu[:,:-1],
+                                                                                      cgrd_at_bry.dz_u())
+                                            cvbar[:] = cgrd.get_barotropic_velocity(cv,
+                                                                                    cgrd_at_bry.scoord2dz())
                                             
                                             cu[:,:-1] *= cgrd_at_bry.umask()
                                             cubar[:-1] *= cgrd_at_bry.umask()
@@ -2197,13 +2012,13 @@ if __name__ == '__main__':
 
 
     # Correct volume fluxes and write to boundary file
-    print '\nProcessing volume flux correction'
+    print('\nProcessing volume flux correction')
     with netcdf.Dataset(romsbry.romsfile, 'a') as nc:
 
         bry_times = nc.variables['bry_time'][:]
         boundarylist = []
 
-        for bry_ind in xrange(bry_times.size):
+        for bry_ind in range(bry_times.size):
 
             uvbarlist = []
 
@@ -2229,7 +2044,7 @@ if __name__ == '__main__':
                                chd_bry_total_surface_area,
                                uvbarlist)
 
-            print '------ barotropic velocity correction:', fc, 'm/s'
+            print('------ barotropic velocity correction:', fc, 'm/s')
 
             for open_boundary, flag in zip(obc_dict.keys(), obc_dict.values()):
 
@@ -2262,4 +2077,4 @@ if __name__ == '__main__':
 
 
 
-    print 'all done'
+    print('all done')

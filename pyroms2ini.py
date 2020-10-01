@@ -128,9 +128,9 @@ class RomsData(RomsData):
         nc.variables['Cs_w'].valid_max = 0.
         nc.variables['Cs_w'][:] = grdobj.Cs_w()
         
-        nc.createVariable('ocean_time', 'f8', ('time'), zlib=True)
-        nc.variables['ocean_time'].long_name = 'time since initialization'
-        nc.variables['ocean_time'].units     = 'seconds'
+        nc.createVariable('scrum_time', 'f8', ('time'), zlib=True)
+        nc.variables['scrum_time'].long_name = 'time since initialization'
+        nc.variables['scrum_time'].units     = 'seconds'
         
         nc.createVariable('tstart', 'f8', ('one'), zlib=True)
         nc.variables['tstart'].long_name = 'start processing day'
@@ -214,6 +214,17 @@ if __name__ == '__main__':
     
     Evan Mason 2012
     '''
+    
+    ###############################################################
+    
+    # INCOMPLETE CODE
+    
+    
+    ###############################################################
+    
+    
+    
+    
     
 
     #_USER DEFINED VARIABLES_______________________________________
