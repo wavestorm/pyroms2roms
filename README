@@ -10,6 +10,11 @@ make_mercator_ini.py
 
 Only bulk fluxes for the moment.
 
+Dependencies:
+Be aware that Basemap from mpl_toolkits is required: 
+https://matplotlib.org/basemap/users/installing.html
+as well as NetCDF4 and the usual suspects (numpy, scipy, pylab)
+
 Note there are some considerable modifications that make these files 
 incompatible with the original pyroms2roms.
 
