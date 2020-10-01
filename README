@@ -1,5 +1,20 @@
 README for py-roms2roms
 
+This fork provides some modified versions of the scripts to provide
+ERA5 and Mercator processing using pre-downloaded monthly files
+already on the hard disk. it also includes overlap processing.
+
+make_mercator.py
+make_era.py
+make_mercator_ini.py
+
+Note there are some considerable modifications that make these files 
+incompatible with the original pyroms2roms.
+
+Dylan F. Bailey
+dylan.bailey@bayworldoceanarium.com
+
+BASED ON PYROMS2ROMS
 Version 1.0.1
 
 py-roms2roms is a Python version of roms2roms (see Mason etal, 2010 and
